@@ -1,0 +1,264 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <base target="_top">
+    <script src="https://unpkg.com/react@18/umd/react.development.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+    <script src="https://unpkg.com/babel-standalone@6/babel.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head>
+
+<body>
+    <div id="root"></div>
+
+    <script type="text/babel" data-type="module">
+
+        const { useState, useEffect, useRef } = React;
+
+        function App() {
+            const [type, setType] = useState("抵抗");
+            const [customType, setCustomType] = useState("");
+            const [value, setValue] = useState("");
+            const [unit, setUnit] = useState("kΩ");
+            const [qty, setQty] = useState("");
+            const [date, setDate] = useState("");
+            const [memo, setMemo] = useState("");
+            const [project, setProject] = useState("");
+
+            const [dataList, setDataList] = useState([]);
+            const [summary, setSummary] = useState([]);
+            const [start, setStart] = useState("");
+            const [end, setEnd] = useState("");
+            const [filterCategory, setFilterCategory] = useState("すべて");
+            const [editRow, setEditRow] = useState(null);
+            const [isEditing, setIsEditing] = useState(false);
+
+            const [recordFilter, setRecordFilter] = useState("すべて");
+            const [sortOrder, setSortOrder] = useState("desc");
+
+            const chartRef = useRef(null);
+
+            const unitOptions = {
+                "抵抗": ["Ω", "kΩ", "MΩ"],
+                "可変抵抗": ["kΩ", "MΩ"],
+                "コンデンサ": ["pF", "nF", "μF"],
+                "トランジスタ": ["-"],
+                "オペアンプ": ["-"],
+                "その他": ["-"]
+            };
+
+            useEffect(() => {
+                setUnit(unitOptions[type][0]);
+            }, [type]);
+
+            useEffect(() => {
+                fetchData();
+            },[]); // 空の依存配列を追加して初回のみ実行
+
+
+
+            useEffect(() => {
+                if (!chartRef.current || summary.length === 0) return;
+                const ctx = chartRef.current.getContext("2d");
+                if (window.myChart) window.myChart.destroy();
+
+                const filteredSummary = summary.filter(([name]) => {
+                    if (filterCategory === "すべて") return true;
+                    return name.startsWith(filterCategory);
+                });
+
+                const labels = filteredSummary.map(([part]) => part);
+                const data = filteredSummary.map(([, count]) => count);
+
+                window.myChart = new Chart(ctx, {
+                    type: "bar",
+                    data: {
+                        labels: labels,
+                        datasets: [{
+                            label: "使用数",
+                            data: data,
+                            backgroundColor: "rgba(54, 162, 235, 0.6)"
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        plugins: {
+                            title: { display: true, text: "部品ごとの使用数（フィルター後）" },
+                            legend: { display: false }
+                        },
+                        scales: { y: { beginAtZero: true } }
+                    }
+                });
+            }, [summary, filterCategory]);
+
+            const fetchData = () => {
+              google.script.run
+                .withSuccessHandler(data => {
+                  console.log("取得したデータ:", data);
+                  setDataList(Array.isArray(data) && data.length > 0 ? data : []);
+                })
+                .withFailureHandler(error => {
+                  console.error("データ取得エラー:", error);
+                  alert("データの取得に失敗しました: " + error);
+                  setDataList([]);
+                })
+                .getData();
+            };
+
+            const resetForm = () => {
+                setValue("");
+                setQty("");
+                setDate("");
+                setMemo("");
+                setCustomType("");
+                setEditRow(null);
+                setIsEditing(false);
+            };
+
+            const handleSubmit = () => {
+                const partName = type === "その他" ? customType : type;
+                const finalPartName = ["トランジスタ", "オペアンプ"].includes(type)
+                    ? `${partName} (${customType})`
+                    : `${partName} (${value}${unit})`;
+
+                if (isEditing) {
+                    google.script.run.withSuccessHandler(() => {
+                        alert("更新しました！");
+                        fetchData();
+                        resetForm();
+                    }).updateRow(editRow, finalPartName, qty, date, memo, project);
+                } else {
+                    google.script.run.withSuccessHandler(() => {
+                        alert("記録しました！");
+                        fetchData();
+                        resetForm();
+                    }).submitData(finalPartName, qty, date, memo, project);
+                }
+            };
+
+            const handleSummary = () => {
+                if (!start || !end) return;
+                google.script.run.withSuccessHandler(setSummary).getDataInRange(start, end);
+            };
+
+
+
+            return (
+                <div style={{ fontFamily: "sans-serif", padding: "1rem", maxWidth: "800px", margin: "auto" }}>
+                    <h2>📋 部品使用記録フォーム</h2>
+
+                    <div>
+                        <label>プロジェクト名:
+                            <input type="text" value={project} onChange={(e) => setProject(e.target.value)} />
+                        </label>
+                    </div>
+
+                    <div>
+                        <label>部品カテゴリ:
+                            <select value={type} onChange={(e) => { setType(e.target.value); setCustomType(""); }}>
+                                <option>抵抗</option>
+                                <option>可変抵抗</option>
+                                <option>コンデンサ</option>
+                                <option>トランジスタ</option>
+                                <option>オペアンプ</option>
+                                <option>その他</option>
+                            </select>
+                        </label>
+                        {["トランジスタ", "オペアンプ", "その他"].includes(type) && (
+                            <input
+                                type="text"
+                                placeholder={type === "その他" ? "部品名を入力" : "品番を入力"}
+                                value={customType}
+                                onChange={(e) => setCustomType(e.target.value)}
+                            />
+                        )}
+                    </div>
+
+                    {!["トランジスタ", "オペアンプ", "その他"].includes(type) && (
+                        <React.Fragment>
+                            <div>
+                                <label>値:
+                                    <input type="text" value={value} onChange={(e) => setValue(e.target.value)} />
+                                </label>
+                            </div>
+                            <div>
+                                <label>単位:
+                                    <select value={unit} onChange={(e) => setUnit(e.target.value)}>
+                                        {unitOptions[type].map((u, i) => <option key={i}>{u}</option>)}
+                                    </select>
+                                </label>
+                            </div>
+                        </React.Fragment>
+                    )}
+
+                    <div>
+                        <label>使用数:
+                            <input type="number" value={qty} onChange={(e) => setQty(e.target.value)} />
+                        </label>
+                    </div>
+
+                    <div>
+                        <label>日付:
+                            <input type="date" value={date} onChange={(e) => setDate(e.target.value)} />
+                        </label>
+                    </div>
+
+                    <div>
+                        <label>メモ:
+                            <input type="text" value={memo} onChange={(e) => setMemo(e.target.value)} />
+                        </label>
+                    </div>
+
+                    <button onClick={handleSubmit}>{isEditing ? "更新" : "送信"}</button>
+
+                    <h3>📅 期間別統計</h3>
+                    <div>
+                        開始日: <input type="date" value={start} onChange={(e) => setStart(e.target.value)} />
+                        終了日: <input type="date" value={end} onChange={(e) => setEnd(e.target.value)} />
+                        <button onClick={handleSummary}>集計する</button>
+                    </div>
+
+                    {summary.length > 0 && (
+                        <React.Fragment>
+                            <div>
+                                <label>カテゴリで絞り込み: </label>
+                                <select value={filterCategory} onChange={(e) => setFilterCategory(e.target.value)}>
+                                    <option value="すべて">すべて</option>
+                                    <option value="抵抗">抵抗</option>
+                                    <option value="可変抵抗">可変抵抗</option>
+                                    <option value="コンデンサ">コンデンサ</option>
+                                    <option value="トランジスタ">トランジスタ</option>
+                                    <option value="オペアンプ">オペアンプ</option>
+                                    <option value="その他">その他</option>
+                                </select>
+                            </div>
+
+                            <canvas ref={chartRef} height="300"></canvas>
+
+                            <table border="1" cellPadding="4" style={{ marginTop: "1rem" }}>
+                                <thead>
+                                    <tr><th>部品名</th><th>合計使用数</th></tr>
+                                </thead>
+                                <tbody>
+                                    {summary
+                                        .filter(([name]) => filterCategory === "すべて" || name.startsWith(filterCategory))
+                                        .map(([part, count], idx) => (
+                                            <tr key={idx}><td>{part}</td><td>{count}</td></tr>
+                                        ))}
+                                </tbody>
+                            </table>
+                        </React.Fragment>
+                    )}
+
+
+                </div>
+            );
+        }
+
+        ReactDOM.render(<App />, document.getElementById("root"));
+
+    </script>
+</body>
+
+</html>
